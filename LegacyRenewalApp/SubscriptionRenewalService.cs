@@ -7,12 +7,14 @@ namespace LegacyRenewalApp
         private readonly InterfaceInputValidator _validator;
         private readonly CustomerDataSource _customerRepo;
         private readonly SubscriptionPlanDataSource _planRepo;
+        private readonly BillingService _billingService;
 
         public SubscriptionRenewalService()
         {
             _validator = new ImplementationInputValidator();
             _customerRepo = new CustomerRepository();
             _planRepo = new SubscriptionPlanRepository();
+            _billingService = new LegacyBillingService();
         }
 
         public RenewalInvoice CreateRenewalInvoice(
@@ -178,7 +180,7 @@ namespace LegacyRenewalApp
                 GeneratedAt = DateTime.UtcNow
             };
 
-            LegacyBillingGateway.SaveInvoice(invoice);
+            _billingService.SaveInvoice(invoice);
 
             if (!string.IsNullOrWhiteSpace(customer.Email))
             {
@@ -188,7 +190,7 @@ namespace LegacyRenewalApp
                     $"Hello {customer.FullName}, your renewal for plan {normalizedPlanCode} " +
                     $"has been prepared. Final amount: {invoice.FinalAmount:F2}.";
 
-                LegacyBillingGateway.SendEmail(customer.Email, subject, body);
+                _billingService.SendEmail(customer.Email, subject, body);
             }
 
             return invoice;
