@@ -5,11 +5,16 @@ namespace LegacyRenewalApp
     public class SubscriptionRenewalService
     {
         private readonly InterfaceInputValidator _validator;
+        private readonly CustomerDataSource _customerRepo;
+        private readonly SubscriptionPlanDataSource _planRepo;
 
         public SubscriptionRenewalService()
         {
             _validator = new ImplementationInputValidator();
+            _customerRepo = new CustomerRepository();
+            _planRepo = new SubscriptionPlanRepository();
         }
+
         public RenewalInvoice CreateRenewalInvoice(
             int customerId,
             string planCode,
@@ -23,11 +28,8 @@ namespace LegacyRenewalApp
             string normalizedPlanCode = planCode.Trim().ToUpperInvariant();
             string normalizedPaymentMethod = paymentMethod.Trim().ToUpperInvariant();
 
-            var customerRepository = new CustomerRepository();
-            var planRepository = new SubscriptionPlanRepository();
-
-            var customer = customerRepository.GetById(customerId);
-            var plan = planRepository.GetByCode(normalizedPlanCode);
+            var customer = _customerRepo.GetById(customerId);
+            var plan = _planRepo.GetByCode(normalizedPlanCode);
 
             if (!customer.IsActive)
             {
@@ -35,6 +37,7 @@ namespace LegacyRenewalApp
             }
 
             decimal baseAmount = (plan.MonthlyPricePerSeat * seatCount * 12m) + plan.SetupFee;
+
             decimal discountAmount = 0m;
             string notes = string.Empty;
 
@@ -94,6 +97,7 @@ namespace LegacyRenewalApp
             }
 
             decimal subtotalAfterDiscount = baseAmount - discountAmount;
+
             if (subtotalAfterDiscount < 300m)
             {
                 subtotalAfterDiscount = 300m;
@@ -101,25 +105,18 @@ namespace LegacyRenewalApp
             }
 
             decimal supportFee = 0m;
+
             if (includePremiumSupport)
             {
-                if (normalizedPlanCode == "START")
-                {
-                    supportFee = 250m;
-                }
-                else if (normalizedPlanCode == "PRO")
-                {
-                    supportFee = 400m;
-                }
-                else if (normalizedPlanCode == "ENTERPRISE")
-                {
-                    supportFee = 700m;
-                }
+                if (normalizedPlanCode == "START") supportFee = 250m;
+                else if (normalizedPlanCode == "PRO") supportFee = 400m;
+                else if (normalizedPlanCode == "ENTERPRISE") supportFee = 700m;
 
                 notes += "premium support included; ";
             }
 
             decimal paymentFee = 0m;
+
             if (normalizedPaymentMethod == "CARD")
             {
                 paymentFee = (subtotalAfterDiscount + supportFee) * 0.02m;
@@ -146,22 +143,11 @@ namespace LegacyRenewalApp
             }
 
             decimal taxRate = 0.20m;
-            if (customer.Country == "Poland")
-            {
-                taxRate = 0.23m;
-            }
-            else if (customer.Country == "Germany")
-            {
-                taxRate = 0.19m;
-            }
-            else if (customer.Country == "Czech Republic")
-            {
-                taxRate = 0.21m;
-            }
-            else if (customer.Country == "Norway")
-            {
-                taxRate = 0.25m;
-            }
+
+            if (customer.Country == "Poland") taxRate = 0.23m;
+            else if (customer.Country == "Germany") taxRate = 0.19m;
+            else if (customer.Country == "Czech Republic") taxRate = 0.21m;
+            else if (customer.Country == "Norway") taxRate = 0.25m;
 
             decimal taxBase = subtotalAfterDiscount + supportFee + paymentFee;
             decimal taxAmount = taxBase * taxRate;
@@ -180,12 +166,14 @@ namespace LegacyRenewalApp
                 PlanCode = normalizedPlanCode,
                 PaymentMethod = normalizedPaymentMethod,
                 SeatCount = seatCount,
+
                 BaseAmount = Math.Round(baseAmount, 2, MidpointRounding.AwayFromZero),
                 DiscountAmount = Math.Round(discountAmount, 2, MidpointRounding.AwayFromZero),
                 SupportFee = Math.Round(supportFee, 2, MidpointRounding.AwayFromZero),
                 PaymentFee = Math.Round(paymentFee, 2, MidpointRounding.AwayFromZero),
                 TaxAmount = Math.Round(taxAmount, 2, MidpointRounding.AwayFromZero),
                 FinalAmount = Math.Round(finalAmount, 2, MidpointRounding.AwayFromZero),
+
                 Notes = notes.Trim(),
                 GeneratedAt = DateTime.UtcNow
             };
@@ -195,6 +183,7 @@ namespace LegacyRenewalApp
             if (!string.IsNullOrWhiteSpace(customer.Email))
             {
                 string subject = "Subscription renewal invoice";
+
                 string body =
                     $"Hello {customer.FullName}, your renewal for plan {normalizedPlanCode} " +
                     $"has been prepared. Final amount: {invoice.FinalAmount:F2}.";
