@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 
 namespace LegacyRenewalApp
 {
@@ -9,12 +11,28 @@ namespace LegacyRenewalApp
         private readonly SubscriptionPlanDataSource _planRepo;
         private readonly BillingService _billingService;
 
+        private readonly List<SupportFeeService> _supportStrategies;
+        private readonly List<IPaymentFeeStrategy> _paymentStrategies;
+
         public SubscriptionRenewalService()
         {
             _validator = new ImplementationInputValidator();
             _customerRepo = new CustomerRepository();
             _planRepo = new SubscriptionPlanRepository();
             _billingService = new LegacyBillingService();
+
+            _supportStrategies = new List<SupportFeeService>
+            {
+                new PlanSupportFeeService(),
+                new ProPlanSupportFeeStrategy(),
+                new EnterprisePlanSupportFeeStrategy()
+            };
+
+            _paymentStrategies = new List<IPaymentFeeStrategy>
+            {
+                new CardPaymentStrategy(),
+                new InvoicePaymentStrategy()
+            };
         }
 
         public RenewalInvoice CreateRenewalInvoice(
@@ -34,15 +52,14 @@ namespace LegacyRenewalApp
             var plan = _planRepo.GetByCode(normalizedPlanCode);
 
             if (!customer.IsActive)
-            {
                 throw new InvalidOperationException("Inactive customers cannot renew subscriptions");
-            }
 
             decimal baseAmount = (plan.MonthlyPricePerSeat * seatCount * 12m) + plan.SetupFee;
 
             decimal discountAmount = 0m;
             string notes = string.Empty;
-
+            
+            
             if (customer.Segment == "Silver")
             {
                 discountAmount += baseAmount * 0.05m;
@@ -106,44 +123,27 @@ namespace LegacyRenewalApp
                 notes += "minimum discounted subtotal applied; ";
             }
 
+            
             decimal supportFee = 0m;
 
             if (includePremiumSupport)
             {
-                if (normalizedPlanCode == "START") supportFee = 250m;
-                else if (normalizedPlanCode == "PRO") supportFee = 400m;
-                else if (normalizedPlanCode == "ENTERPRISE") supportFee = 700m;
+                var supportStrategy = _supportStrategies
+                    .First(s => s.CanHandle(normalizedPlanCode));
 
+                supportFee = supportStrategy.Calculate(normalizedPlanCode);
                 notes += "premium support included; ";
             }
 
-            decimal paymentFee = 0m;
+            
+            var paymentStrategy = _paymentStrategies
+                .First(p => p.CanHandle(normalizedPaymentMethod));
 
-            if (normalizedPaymentMethod == "CARD")
-            {
-                paymentFee = (subtotalAfterDiscount + supportFee) * 0.02m;
-                notes += "card payment fee; ";
-            }
-            else if (normalizedPaymentMethod == "BANK_TRANSFER")
-            {
-                paymentFee = (subtotalAfterDiscount + supportFee) * 0.01m;
-                notes += "bank transfer fee; ";
-            }
-            else if (normalizedPaymentMethod == "PAYPAL")
-            {
-                paymentFee = (subtotalAfterDiscount + supportFee) * 0.035m;
-                notes += "paypal fee; ";
-            }
-            else if (normalizedPaymentMethod == "INVOICE")
-            {
-                paymentFee = 0m;
-                notes += "invoice payment; ";
-            }
-            else
-            {
-                throw new ArgumentException("Unsupported payment method");
-            }
+            decimal paymentFee = paymentStrategy
+                .Calculate(subtotalAfterDiscount + supportFee);
 
+            notes += normalizedPaymentMethod.ToLower() + " payment; ";
+            
             decimal taxRate = 0.20m;
 
             if (customer.Country == "Poland") taxRate = 0.23m;
